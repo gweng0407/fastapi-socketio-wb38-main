@@ -3,6 +3,9 @@ import socketio
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+# venv\Scripts\activate
+# uvicorn server:combined_asgi_app --reload --port 5000
+
 # FastAPI 인스턴스 생성
 app = FastAPI()
 
