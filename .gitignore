@@ -1,0 +1,7 @@
+# .gitignore
+
+# app 폴더 내의 가상환경 파일
+app/env/
+
+#web 폴더 내의 Node.js 모듈 디렉토리
+web/node_modules/
