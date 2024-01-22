@@ -53,18 +53,23 @@ usersName = {}
 usersInRoom = {}
 
 @sio.on("readyForStream")
-async def joined(sid, roomName, userName):
+async def readyForStream(sid, roomName, userName):
     sessions[roomName] = {"userName": userName,
                           "mute_audio": False, "mute_video": False}
-    await sio.emit("readyForStreamSuccess", {"roomName": roomName})
-    print(f"rooName: {roomName}, userName: {userName}, sid: {sid}")
+    await sio.emit("readyForStreamSuccess", {"roomName": roomName}, to=sid)
+   # print(f"rooName: {roomName}, userName: {userName}, sid: {sid}")
 
 @sio.on("join_room")
 async def on_join_room(sid, roomName):
-    roomName = roomName
     userName = sessions[roomName]["userName"]
 
-    print(f"join_success {roomName}")
+    # 중복 참여 확인
+    if sid in roomsName:
+        print(f"User {userName} with SID {sid} is already in room {roomsName[sid]}.")
+        return
+    if userName in usersName.values():
+        print(f"User {userName} is already in a room.")
+        return
 
     await sio.enter_room(room=roomName, sid=sid)
     roomsName[sid] = roomName
@@ -73,18 +78,39 @@ async def on_join_room(sid, roomName):
     print(f"[{roomName}] New member joined: {userName}<{sid}>")
 
     await sio.emit("user_join", {"sid": sid, "userName": userName}, room=roomName, skip_sid=sid)
+    
+    print("send user_join event success")
+    
+    if roomName not in usersInRoom:
+        usersInRoom[roomName] = [sid]
+        
+        await sio.emit("user_list", {"my_id": sid}, to=sid
+                       )
+        print("send user_list event success 1")
+    else:
+        userList = {userName: usersName[userName]
+                    for userName in usersInRoom[roomName]}
 
-    # if roomName not in usersInRoom:
-    #     usersInRoom[roomName] = [sid]
+        # 이 부분에 추가: 이미 해당 사용자가 목록에 있는 경우에만 emit
+        if sid not in usersInRoom[roomName]:
+            await sio.emit("user_list", {"list": userList, "my_id": sid}, to=sid)
+            print("send user_list event success 2")
+            usersInRoom[roomName].append(sid)
+            print(f"users: {usersInRoom}")
 
-    #     await sio.emit("user_list", {"my_id": sid}, to=sid)
-    # else:
-    #    userList = {userName: usersName[userName]
-    #                for userName in usersInRoom[roomName]}
-       
-    #    await sio.emit("user_list", {"list": userList, "my_id": sid}, to=sid)
-    #    usersInRoom[roomName].append(sid)
-    #    print(f"users: {usersInRoom}")
+
+@sio.on("data")
+async def on_data(sid, data):
+    sender_sid = data['sender_id']
+    target_sid = data['target_id']
+    if sender_sid != sid:
+        print("[Not supposed to happen!] request.sid and sender_id don't match!!!")
+
+    if data["type"] != "new-ice-candidate":
+        print('{} message from {} to {}'.format(
+            data["type"], sender_sid, target_sid))
+    await sio.emit('data', data, to=target_sid)
+    
 
 
 # FastAPI Start Setting
