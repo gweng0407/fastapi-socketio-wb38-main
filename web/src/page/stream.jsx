@@ -117,10 +117,21 @@ function Stream({ socket }) {
 
   // Track 이벤트 핸들러 정의
   const handleTrackEvent = useCallback((event, peer_id) => {
-    console.log(`track event received from <${peer_id}>`);
+    console.log(`handleTrackEvent received from <${peer_id}>`);
 
     if (event.streams) {
+      console.log(`Adding video track for peer ${peer_id}`);
       getVideoObj(peer_id).srcObject = event.streams[0];
+      const videoElement = document.createElement("video");
+      videoElement.id = "vid_" + peer_id;
+      videoElement.autoplay = true;
+      videoElement.srcObject = event.streams[0];
+
+      // 비디오 엘리먼트를 비디오 그리드에 추가
+      document.getElementById("video_grid").appendChild(videoElement);
+
+      // 새로운 비디오 엘리먼트에 트랙을 추가합니다.
+      videoElement.srcObject = event.streams[0];
     }
   }, []);
 
@@ -129,9 +140,20 @@ function Stream({ socket }) {
     return document.getElementById("vid_" + element_id);
   }
 
+  // // 비디오 요소 가져오기
+  // function getVideoObj(element_id) {
+  //   return document.getElementById("vid_" + element_id);
+  // }
+
   // handleNegotiationNeededEvent 함수 추가
   const handleNegotiationNeededEvent = useCallback(
     (peer_id) => {
+      if (peerList[peer_id].connectionStarted) {
+        console.log(
+          `Negotiation not needed for ${peer_id}, connection already started.`
+        );
+        return;
+      }
       peerList[peer_id]
         .createOffer()
         .then((offer) => peerList[peer_id].setLocalDescription(offer))
@@ -180,8 +202,7 @@ function Stream({ socket }) {
   const handleOfferMsg = useCallback(
     (msg) => {
       const peer_id = msg["sender_id"];
-
-      console.log(`Offer received from <${peer_id}>`);
+      console.log(`handleOfferMsg received from <${peer_id}>`);
 
       createPeerConnection(peer_id);
       let desc = new RTCSessionDescription(msg["sdp"]);
@@ -216,7 +237,7 @@ function Stream({ socket }) {
   const handleAnswerMsg = useCallback(
     (msg) => {
       const peer_id = msg["sender_id"];
-      console.log(`Answer received from <${peer_id}>`);
+      console.log(`handleAnswerMsg received from <${peer_id}>`);
       let desc = new RTCSessionDescription(msg["sdp"]);
       peerList[peer_id].setRemoteDescription(desc);
     },
@@ -249,13 +270,18 @@ function Stream({ socket }) {
       } else {
         console.log(`Creating peer connection for <${peerId}> ...`);
         createPeerConnection(peerId);
-        await sleep(2000);
-        let local_stream = myVideo.current.srcObject;
-        console.log(myVideo.current.srcObject);
-        local_stream.getTracks().forEach((track) => {
-          peerList[peerId].addTrack(track, local_stream);
-        });
-        console.log(myVideo.current.srcObject);
+        // 추가: 이미 연결이 존재하지 않은 경우에만 연결을 시도
+        if (!peerList[peerId].connectionStarted) {
+          await sleep(2000);
+          let local_stream = myVideo.current.srcObject;
+          console.log(myVideo.current.srcObject);
+          local_stream.getTracks().forEach((track) => {
+            peerList[peerId].addTrack(track, local_stream);
+          });
+          console.log(myVideo.current.srcObject);
+          // 추가: 연결이 시작되었음을 표시
+          peerList[peerId].connectionStarted = true;
+        }
       }
     },
     [peerList, myID, createPeerConnection]
@@ -339,21 +365,6 @@ function Stream({ socket }) {
     socket.on("readyForStreamSuccess", handleReadyForStreamSuccess);
     socket.on("user_join", handleUserJoin);
     socket.on("user_list", handleUserList);
-    socket.on("data", (msg) => {
-      switch (msg["type"]) {
-        case "offer":
-          handleOfferMsg(msg);
-          break;
-        case "answer":
-          handleAnswerMsg(msg);
-          break;
-        case "new-ice-candidate":
-          handleNewICECandidateMsg(msg);
-          break;
-        default:
-          console.warn("Unknown message type:", msg["type"]);
-      }
-    });
 
     // 컴포넌트가 언마운트 될 때 리스너 제거
     return () => {

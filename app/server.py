@@ -99,18 +99,6 @@ async def on_join_room(sid, roomName):
             print(f"users: {usersInRoom}")
 
 
-@sio.on("data")
-async def on_data(sid, data):
-    sender_sid = data['sender_id']
-    target_sid = data['target_id']
-    if sender_sid != sid:
-        print("[Not supposed to happen!] request.sid and sender_id don't match!!!")
-
-    if data["type"] != "new-ice-candidate":
-        print('{} message from {} to {}'.format(
-            data["type"], sender_sid, target_sid))
-    await sio.emit('data', data, to=target_sid)
-    
 
 
 # FastAPI Start Setting
