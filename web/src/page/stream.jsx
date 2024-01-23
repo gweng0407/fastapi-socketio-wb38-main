@@ -27,6 +27,7 @@ function Stream({ socket }) {
   const [peerList, setPeerList] = useState({});
   const [myID, setMyID] = useState(null);
   const [userListUpdated, setUserListUpdated] = useState(false);
+  const [videoElements, setVideoElements] = useState([]);
 
   // 미디어 제약 조건 정의
   const mediaConstraints = {
@@ -58,28 +59,12 @@ function Stream({ socket }) {
 
   // 오디오 음소거 설정 함수
   const setAudioMuteState = (flag) => {
-    let muteIcon = document.getElementById("aud_mute_icon");
-    if (muteIcon) {
-      let localStream = document.getElementById("local_vid").srcObject;
-      localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !flag;
-      });
-
-      setAudioState(flag);
-    }
+    setAudioState(flag);
   };
 
   // 비디오 음소거 설정 함수
   const setVideoMuteState = (flag) => {
-    let vidMuteIcon = document.getElementById("vid_mute_icon");
-    if (vidMuteIcon) {
-      let localStream = document.getElementById("local_vid").srcObject;
-      localStream.getVideoTracks().forEach((track) => {
-        track.enabled = !flag;
-      });
-
-      setVideoState(flag);
-    }
+    setVideoState(flag);
   };
 
   // 스트림 준비 이벤트 핸들러
@@ -302,40 +287,37 @@ function Stream({ socket }) {
 
     // 비디오 엘리먼트 추가 함수
     function addVideoElement(element_id, display_name) {
-      const videoElement = makeVideoElementCustom(element_id, display_name);
-      document.getElementById("video_grid").appendChild(videoElement);
+      const newVideoElement = (
+        <video key={element_id} id={"vid_" + element_id} autoPlay playsInline>
+          {display_name}
+        </video>
+      );
+      setVideoElements((prevVideoElements) => [
+        ...prevVideoElements,
+        newVideoElement,
+        { id: "vid_" + element_id, display_name, autoplay: true },
+      ]);
       console.log("비디오 엘리먼트 추가 완료");
     }
 
     // 커스텀 비디오 엘리먼트 생성 함수
-    function makeVideoElementCustom(element_id, display_name) {
-      let vid = document.createElement("video");
-      vid.id = "vid_" + element_id;
-      vid.autoplay = true;
-      return vid;
-    }
+    // function makeVideoElementCustom(element_id, display_name) {
+    //   let vid = document.createElement("video");
+    //   vid.id = "vid_" + element_id;
+    //   vid.autoplay = true;
+    //   return vid;
+    // }
 
     const handleUserList = ({ my_id, list }) => {
       console.log("user list recv ", my_id);
       setMyID(my_id); //일단 여기 라인 비동기라서 아래에서 콘솔로그로 확인하면 my_id 업데이트 안되서 null값 나옴
       if (list) {
-        //방에 처음으로 연결되지 않은 경우, 기존 사용자 목록 수신
-        let recvd_list = list;
-        //기존 사용자를 사용자 목록에 추가
-        for (let peerId in recvd_list) {
-          let peerName = recvd_list[peerId];
-          //setPeerList도 비동기인데가 왜 업데이트 안되는 지 모르겠음 아마 비동기에 useEffect섞여서
-          //myID랑 같은 문제인듯
-          setPeerList((prevPeerList) => {
-            const newPeerList = { ...prevPeerList, [peerId]: undefined };
-            console.log(newPeerList);
-            return {
-              newPeerList,
-            };
-          });
-          setUserListUpdated(true); // 여기에서 상태를 업데이트합니다.
-          addVideoElement(peerId, peerName);
-        }
+        setPeerList((prevPeerList) => {
+          const newPeerList = { ...prevPeerList, ...list };
+          console.log(newPeerList);
+          return newPeerList;
+        });
+        setUserListUpdated(true);
       }
     };
 
@@ -394,7 +376,9 @@ function Stream({ socket }) {
       </form>
 
       {/* 비디오 그리드 */}
-      <div id="video_grid">{/* 비디오 요소가 여기에 추가됩니다 */}</div>
+      <div id="video_grid">
+        {videoElements.map((videoElement) => videoElement)}
+      </div>
 
       {/* 로컬 비디오 요소 */}
       <video id="local_vid" ref={myVideo} autoPlay playsInline />
