@@ -4,7 +4,12 @@ from fastapi.responses import FileResponse,HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import socketio
+import wave
 import uvicorn
+import time
+from io import BytesIO
+import asyncio
+from pydub import AudioSegment
 from collections import  defaultdict
 import os
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,8 +44,8 @@ app.add_middleware( ##
     allow_headers=["*"],
 )
 #관리자 모드 인증 설정
-sio.instrument(auth=False) # 권한 없이 접속하기
-# sio.instrument({'username':'WB38' , 'password':os.environ['WB38']})
+# sio.instrument(auth=False) # 권한 없이 접속하기
+sio.instrument({'username':'WB38' , 'password':os.environ['WB38']})
 
 #socketIO와 FastAPI를 합치기
 combined_asgi_app = socketio.ASGIApp(sio, app)
@@ -52,8 +57,11 @@ users_in_room = {} # users_in_room[room_id] =[] sid]
 rooms_sid = {} # rooms_sid[sid] = room_id
 names_sid = {} # names_sid[sid] = client_name
 sessions = {}# 사용자 정보를 저장할 딕셔너리
+is_turtor =  {} # 최초 개설자 즉 튜터 : 튜터에게서 voice 이벤트를 받음 
 combined_asgi_app = socketio.ASGIApp(sio, app)
- 
+@app.get('/')
+async def iindex():
+    return FileResponse("codecfile.html")
 @app.get('/join',response_class=HTMLResponse,name='join')
 async def index(request:Request,
           room_id:Optional[str]=None,
@@ -70,9 +78,64 @@ async def index(request:Request,
                         "mute_audio": mute_audio, "mute_video": mute_video}
     # 세션에 사용자 정보 저장
     response =   templates.TemplateResponse(
-        "join.html", {"request": request,"room_id": room_id, "display_name": sessions[room_id]["name"], "mute_audio": sessions[room_id]["mute_audio"], "mute_video": sessions[room_id]["mute_video"]})
+        "join.html", {"request": request,"room_id": room_id, "display_name": sessions[room_id]["name"],
+                       "mute_audio": sessions[room_id]["mute_audio"], "mute_video": sessions[room_id]["mute_video"]})
     return response
+# @app.post("/file")
+# async def upload_file(file:UploadFile,request:Request,
+#                       dirname:Optional[str]=None,filename:Optional[str]=None):
+#     content = await file.read()
+#     filenamed = f"{str(filename)}.jpg"  # uuid로 유니크한 파일명으로 변경
+#     with open(os.path.join(dirname, filenamed), "wb") as fp:
+#         fp.write(content)  # 서버 로컬 스토리지에 이미지 저장 (쓰기)
+ 
+#     return {"filename": filename}
+#     # 한번에 받고 한번에 처리하는 방식
+lock_threading = {}
+@sio.on('voice')
+def handle_voice(sid, data):
+    try:
+        # BytesIO를 사용하여 메모리 상에서 오디오 데이터를 로드
+        audio_segment = AudioSegment.from_file(BytesIO(data), format="webm")
+
+        # 오디오 파일로 저장
+        directory = str(names_sid.get(sid))
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        # 오디오 파일로 저장 (wav 형식으로 변환)
+        file_path = os.path.join(directory, f'{sid}.wav')
+        audio_segment.export(file_path, format='wav')
+        print('오디오 파일 저장 완료')
+
+    except Exception as e:
+        print(f"WebM 데이터 디코딩 중 오류 발생: {e}")
+
+async def get_file_lock(file_path):
+    if file_path not in lock_threading:        
+        lock_threading[file_path] = asyncio.Lock()
+    return lock_threading[file_path]
+    # sockeTIO 한번에 받고 한번에 처리하는 방식 
+
+# # chunk for file 
+# @sio.on('wave')
+# def get_chunk(sid,chunk):  # BytesIO를 사용하여 메모리 상에서 오디오 데이터를 로드
+#     audio_segment = AudioSegment.from_file(BytesIO(chunk), format="wav")
+ 
+#     # 오디오 파일로 저장
+#     directory = str(names_sid.get(sid))
+#     if not os.path.exists(directory):
+#         os.makedirs(directory)
+ 
+#     # 오디오 파일로 저장
+#     file_path = os.path.join(directory, f'{sid}.wav')
+#     audio_segment.export(file_path, format='wav')
     
+#     print('오디오 파일 저장 완료')
+#     # sockeTIO 한번에 받고 한번에 처리하는 방식 
+
+
+
 @sio.on("connect")
 async def connected(sid,*args, **kwargs):     
      # 접속 시 모든 방에 대한 리스트 줌 방 보기  
@@ -91,7 +154,9 @@ async def on_join_room(sid,data):
     await sio.emit("user-connect",{"sid":sid, "name":display_name},room=room_id,skip_sid=sid)
     if room_id not in users_in_room:
         users_in_room[room_id] = [sid]
+        is_turtor[sid] = rooms_sid.get(sid)
         await sio.emit("user-list", {"my_id": sid},to=sid)  # send own id only
+        await sio.emit("tutor",to=sid)
     else:
         usrlist = {u_id: names_sid[u_id]
                    for u_id in users_in_room[room_id]}
@@ -109,16 +174,21 @@ async def on_disconnect(sid,*args, **kwargs):
     await sio.emit("user-disconnect",{"sid": sid} 
                    ,room=room_id,skip_sid=sid)
 
-    users_in_room[room_id].pop(sid,None)
+    users_in_room[room_id].remove(sid)
     if len(users_in_room[room_id]) == 0:
         users_in_room.pop(room_id,None)
-
+    is_turtor.pop(sid,None)
     rooms_sid.pop(sid,None)
     names_sid.pop(sid,None)
     
     await sio.leave_room(sid=sid,room=room_id)
     print("\nusers: ", users_in_room, "\n")
-
+    
+@sio.on('chat')
+async def on_chat(sid,message):
+    target_room = rooms_sid.get(sid)
+    await sio.emit(message,room=target_room)
+    
 @sio.on("data")
 async def on_data(sid,data):
     sender_sid = data['sender_id']
